@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { getBlockedFishingDates } from '../lib/syncService';
 
 
 import IslandFoodSection from './IslandFoodSection';
+import ActivityIconGrid from './ActivityIconGrid';
 
 
 const { width } = Dimensions.get('window');
@@ -1077,9 +1078,8 @@ function FishingTabContent({ fishingActivities, onBook, onBookInshore, onOpenCar
                 </View>
               </View>
               <View style={fishS.optionRight}>
-                <Text style={fishS.optionPrice}>${displayPrice}</Text>
-                {hasAnglerCost && <Text style={fishS.optionPriceSub}>+${anglerCost}/extra</Text>}
-                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color="#94A3B8" style={{ marginTop: 4 }} />
+                {/* Price hidden here — only shown when expanded & selecting anglers */}
+                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color="#94A3B8" />
               </View>
             </TouchableOpacity>
 
@@ -1440,7 +1440,7 @@ function ChillGymCard({ item, onBookChillGym }: {
 
 
 
-// ─── Main Component (no tab bar — icons grid is the selector) ───
+// ─── Main Component (icons grid is the selector; sections are unrolled) ───
 interface ActivityTabsSectionProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
@@ -1452,6 +1452,15 @@ interface ActivityTabsSectionProps {
   onOpenCart?: () => void;
   onBookChillGym?: () => void;
   configRefreshKey?: number;
+  // New: which part of the page this instance renders
+  section?: 'fishing' | 'activities';
+  // For activities mode: scroll-to-section support
+  scrollRef?: React.RefObject<any>;
+  sectionBaseY?: number;
+  onBoatPress?: () => void;
+  onFishingPress?: () => void;
+  // Lets the parent reuse the exact same scroll-to-section logic (quick links / pinned bar)
+  onRegisterTabHandler?: (handler: (tab: string) => void) => void;
 }
 
 export default function ActivityTabsSection({
@@ -1465,13 +1474,19 @@ export default function ActivityTabsSection({
   onOpenCart,
   onBookChillGym,
   configRefreshKey,
+  section = 'activities',
+  scrollRef,
+  sectionBaseY = 0,
+  onBoatPress,
+  onFishingPress,
+  onRegisterTabHandler,
 }: ActivityTabsSectionProps) {
 
   const { addItem } = useCart();
-  const itemRefs = useRef<Record<string, number>>({});
+  const { t } = useLang();
+  const sectionY = useRef<Record<string, number>>({});
 
   // Re-read config data when configRefreshKey changes (config was reloaded from GitHub)
-  // Previously these had [] deps which meant they NEVER updated after first mount
   const waterItems = useMemo(() => getWaterItemsFromConfig(), [configRefreshKey]);
   const islandItems = useMemo(() => getIslandItemsFromConfig(), [configRefreshKey]);
   const overnightItem = useMemo(() => getOvernightItemFromConfig(), [configRefreshKey]);
@@ -1491,89 +1506,105 @@ export default function ActivityTabsSection({
     showToast(`${name} added to cart!`, 'success');
   };
 
-
-  return (
-    <View style={styles.container}>
-      {/* No tab bar — the ActivityIconGrid above serves as the tab selector */}
-
-      {/* Tab Content */}
-      {activeTab === 'food' && (
-        <IslandFoodSection showToast={showToast} configRefreshKey={configRefreshKey} />
-      )}
-
-
-      {activeTab === 'fishing' && (
+  // ─── FISHING-ONLY render (placed between map and boat booking) ───
+  if (section === 'fishing') {
+    return (
+      <View style={styles.container}>
         <FishingTabContent
           fishingActivities={fishingActivities}
           onBook={onBookActivity}
           onBookInshore={onBookInshore}
           onOpenCart={onOpenCart}
         />
-      )}
+      </View>
+    );
+  }
+
+  // ─── Tab click from icon grid:
+  //     boat → scroll up to boat booking
+  //     fishing → scroll up to fishing section
+  //     others → scroll down to their unrolled section ───
+  const handleIconTab = (tab: string) => {
+    if (tab === 'boat') {
+      if (onBoatPress) onBoatPress();
+      return;
+    }
+    if (tab === 'fishing') {
+      if (onFishingPress) onFishingPress();
+      return;
+    }
+    onTabChange(tab);
+    const relY = sectionY.current[tab] ?? 0;
+    setTimeout(() => {
+      scrollRef?.current?.scrollTo({ y: Math.max(0, sectionBaseY + relY - 8), animated: true });
+    }, 60);
+  };
+
+  // Keep latest handler in a ref and expose a stable wrapper to the parent once.
+  const iconTabRef = useRef(handleIconTab);
+  iconTabRef.current = handleIconTab;
+  useEffect(() => {
+    if (onRegisterTabHandler) {
+      onRegisterTabHandler((tab: string) => iconTabRef.current(tab));
+    }
+  }, [onRegisterTabHandler]);
 
 
-      {activeTab === 'water' && (
+
+  // ─── ACTIVITIES render — icon grid + ALL sections unrolled ───
+  return (
+    <View style={styles.container}>
+      <ActivityIconGrid onTabSwitch={handleIconTab} activeTab={activeTab} />
+
+      {/* WATER */}
+      <View onLayout={(e) => { sectionY.current['water'] = e.nativeEvent.layout.y; }}>
         <View style={styles.tabContent}>
           <View style={styles.tabIntro}>
             <MaterialCommunityIcons name="waves" size={18} color="#0D9488" />
-            <Text style={styles.tabIntroText}>
-              {introTexts.water}
-            </Text>
+            <Text style={styles.tabIntroText}>{introTexts.water}</Text>
           </View>
-          
-          <View onLayout={(e) => { itemRefs.current['kayaks'] = e.nativeEvent.layout.y; }}>
-            <KayaksCard onAdd={handleAddToCart} configRefreshKey={configRefreshKey} />
-
-          </View>
-
+          <KayaksCard onAdd={handleAddToCart} configRefreshKey={configRefreshKey} />
           {waterItems.map((item) => (
-            <View key={item.id} onLayout={(e) => { itemRefs.current[item.id] = e.nativeEvent.layout.y; }}>
-              <ActivityItemCard item={item} onAdd={handleAddToCart} />
-            </View>
+            <ActivityItemCard key={item.id} item={item} onAdd={handleAddToCart} />
           ))}
         </View>
-      )}
+      </View>
 
-      {activeTab === 'island' && (
+      {/* ISLAND */}
+      <View onLayout={(e) => { sectionY.current['island'] = e.nativeEvent.layout.y; }}>
         <View style={styles.tabContent}>
-          <View style={styles.tabIntro}>
+          <View style={[styles.tabIntro, { backgroundColor: '#F0FDF4' }]}>
             <MaterialCommunityIcons name="palm-tree" size={18} color="#16A34A" />
-            <Text style={styles.tabIntroText}>
-              {introTexts.island}
-            </Text>
+            <Text style={[styles.tabIntroText, { color: '#16A34A' }]}>{introTexts.island}</Text>
           </View>
           {islandItems.map((item) => {
             const isChillGym = item.id === 'chill_gym';
-            return (
-              <View key={item.id} onLayout={(e) => { itemRefs.current[item.id] = e.nativeEvent.layout.y; }}>
-                {isChillGym ? (
-                  <ChillGymCard item={item} onBookChillGym={onBookChillGym} />
-                ) : (
-                  <ActivityItemCard item={item} onAdd={handleAddToCart} />
-                )}
-
-              </View>
+            return isChillGym ? (
+              <ChillGymCard key={item.id} item={item} onBookChillGym={onBookChillGym} />
+            ) : (
+              <ActivityItemCard key={item.id} item={item} onAdd={handleAddToCart} />
             );
           })}
         </View>
-      )}
+      </View>
 
-
-      {activeTab === 'overnight' && (
+      {/* OVERNIGHT */}
+      <View onLayout={(e) => { sectionY.current['overnight'] = e.nativeEvent.layout.y; }}>
         <View style={styles.tabContent}>
           <View style={[styles.tabIntro, { backgroundColor: '#F5F3FF' }]}>
             <MaterialCommunityIcons name="sleep" size={18} color="#7C3AED" />
-            <Text style={[styles.tabIntroText, { color: '#7C3AED' }]}>
-              {tFn('overnight_description')}
-            </Text>
-
-
+            <Text style={[styles.tabIntroText, { color: '#7C3AED' }]}>{tFn('overnight_description')}</Text>
           </View>
           {overnightItem && (
             <OvernightStayCard item={overnightItem} onAdd={handleAddToCart} showToast={showToast} />
           )}
         </View>
-      )}
+      </View>
+
+      {/* FOOD (last) */}
+      <View onLayout={(e) => { sectionY.current['food'] = e.nativeEvent.layout.y; }}>
+        <IslandFoodSection showToast={showToast} configRefreshKey={configRefreshKey} />
+      </View>
     </View>
   );
 }

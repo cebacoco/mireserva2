@@ -210,6 +210,14 @@ export interface ConfigFooter {
   email: string;
 }
 
+// ─── Blackout periods — boat reservation disabled for a beach (or ALL) during a date range ───
+export interface ConfigBlackout {
+  beach: string;       // beach id like "coco_loco", or "ALL" for every beach
+  start: string;       // YYYY-MM-DD (inclusive)
+  end: string;         // YYYY-MM-DD (inclusive)
+  reason?: string;     // optional human-readable reason
+}
+
 
 export interface ConfigFishing {
   intro_text: string;
@@ -242,6 +250,8 @@ export interface AppConfig {
   fishing?: ConfigFishing;
   overnight?: ConfigOvernight;
   footer?: ConfigFooter;
+  blackouts: ConfigBlackout[];
+
   timestamps: SectionTimestamps;
   // ─── UI Strings from [strings_en] and [strings_es] sections ───
   strings_en?: Record<string, string>;
@@ -691,6 +701,23 @@ export function buildAppConfig(config: ParsedConfig): AppConfig {
     };
   }
 
+  // ─── Blackout periods ───
+  // [blackout] section. Each entry: period_N=<beach|ALL>|<start YYYY-MM-DD>|<end YYYY-MM-DD>|<optional reason>
+  const blackouts: ConfigBlackout[] = [];
+  if (config.blackout) {
+    for (const val of getNumberedValues(config.blackout, 'period')) {
+      const parts = val.split('|').map(p => p.trim());
+      if (parts.length >= 3 && parts[1] && parts[2]) {
+        blackouts.push({
+          beach: parts[0] || 'ALL',
+          start: parts[1],
+          end: parts[2],
+          reason: parts[3] || undefined,
+        });
+      }
+    }
+  }
+
   // ─── UI Strings [strings_en] and [strings_es] ───
   const strings_en: Record<string, string> | undefined = config.strings_en
     ? { ...config.strings_en }
@@ -717,6 +744,8 @@ export function buildAppConfig(config: ParsedConfig): AppConfig {
     fishing,
     overnight,
     footer,
+    blackouts,
+
     timestamps,
     strings_en,
     strings_es,

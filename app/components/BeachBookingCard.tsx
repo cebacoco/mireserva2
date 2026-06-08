@@ -18,6 +18,8 @@ import { getBeachTags } from '../lib/beachTags';
 import { getDayCapacity, checkBoatCapacity, checkFishingCapacity, checkBeachAvailability, isLocoBlockedByFishing, getCapacityColor, getBeachCapacityColor, getBeachDayCapacity, BEACH_MAX_CAPACITY, BOAT_MAX_CAPACITY, isFishingDayBlocked } from '../lib/capacityService';
 import { subscribeSyncState, getSyncVersion, getSyncState, getBlockedFishingDates } from '../lib/syncService';
 import { getConfig } from '../lib/dataService';
+import { isBeachBlackedOut, getBlackoutReason, isDateFullyBlackedOut } from '../lib/blackoutService';
+
 
 
 
@@ -150,6 +152,8 @@ interface BeachBookingCardProps {
   preselectedBeachId?: number | null;
   preselectedInshore?: boolean;
   preselectedChillGym?: boolean;
+  // Increment this number to force the card to expand (used by the Boat tab / quick link)
+  forceExpandTrigger?: number;
   // Enhance trip callbacks
   onEnhanceFood?: () => void;
   onEnhanceOvernight?: () => void;
@@ -158,7 +162,7 @@ interface BeachBookingCardProps {
   onEnhanceFishing?: () => void;
 }
 
-export default function BeachBookingCard({ beaches, onBeachPress, onSuccess, onOpenCart, preselectedBeachId, preselectedInshore, preselectedChillGym, onEnhanceFood, onEnhanceOvernight, onEnhanceWater, onEnhanceIsland, onEnhanceFishing }: BeachBookingCardProps) {
+export default function BeachBookingCard({ beaches, onBeachPress, onSuccess, onOpenCart, preselectedBeachId, preselectedInshore, preselectedChillGym, forceExpandTrigger, onEnhanceFood, onEnhanceOvernight, onEnhanceWater, onEnhanceIsland, onEnhanceFishing }: BeachBookingCardProps) {
 
   // ─── ALL images from GitHub config — NO hardcoded URLs ───
   const BEACH_PHOTOS = useMemo(() => getBeachGalleryFromConfig(), []);
@@ -241,6 +245,14 @@ export default function BeachBookingCard({ beaches, onBeachPress, onSuccess, onO
     }
   }, [preselectedChillGym]);
 
+  // React to force-expand requests (Boat tab / quick link). Skip the initial 0 value.
+  useEffect(() => {
+    if (forceExpandTrigger && forceExpandTrigger > 0) {
+      setExpanded(true);
+    }
+  }, [forceExpandTrigger]);
+
+
 
   // Clear validation error when user makes selections
   useEffect(() => {
@@ -316,6 +328,14 @@ export default function BeachBookingCard({ beaches, onBeachPress, onSuccess, onO
       }
       // ─── BEACH AVAILABILITY CHECK (per-beach capacity + overnight exclusivity) ───
       const beachName = selectedBeach?.name || 'Beach';
+
+      // ─── BLACKOUT CHECK (operator-defined closures from config) ───
+      if (isBeachBlackedOut(selectedDate, beachName)) {
+        setValidationError(getBlackoutReason(selectedDate, beachName));
+        return;
+      }
+
+
       const beachAvail = checkBeachAvailability(
         selectedDate,
         beachName,
@@ -678,11 +698,29 @@ export default function BeachBookingCard({ beaches, onBeachPress, onSuccess, onO
             {/* ─── Per-Beach Capacity Info Banner (shown when date + beach selected) ─── */}
             {selectedDate && selectedBeach ? (() => {
               const beachName = selectedBeach.name;
+
+              // Blackout closure takes priority over everything else
+              if (isBeachBlackedOut(selectedDate, beachName)) {
+                return (
+                  <View style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 8,
+                    backgroundColor: '#FEF2F2', borderRadius: 10, padding: 10, marginTop: 8,
+                    borderWidth: 1, borderColor: '#FECACA',
+                  }}>
+                    <Ionicons name="lock-closed" size={18} color="#DC2626" />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#DC2626', flex: 1 }}>
+                      {getBlackoutReason(selectedDate, beachName)}
+                    </Text>
+                  </View>
+                );
+              }
+
               const beachAvail = checkBeachAvailability(selectedDate, beachName, totalPassengers);
               const beachCap = getBeachDayCapacity(selectedDate, beachName);
               const beachColor = getBeachCapacityColor(selectedDate, beachName);
               const locoBlocked = beachName.toLowerCase().includes('loco') && isLocoBlockedByFishing(selectedDate);
               
+
               return (
                 <View style={{
                   flexDirection: 'row',

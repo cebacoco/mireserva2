@@ -81,6 +81,7 @@ Confirmation Number: ${booking.confirmationNumber}`;
 interface CartSidebarProps {
   visible: boolean;
   onClose: () => void;
+  onNavigateToBoat?: () => void;
   onBookingComplete?: (booking: {
     confirmationNumber: string;
     customerName: string;
@@ -94,26 +95,45 @@ interface CartSidebarProps {
 
 type CheckoutStep = 'cart' | 'contact' | 'sending' | 'success' | 'error';
 
-export default function CartSidebar({ visible, onClose, onBookingComplete }: CartSidebarProps) {
+export default function CartSidebar({ visible, onClose, onNavigateToBoat, onBookingComplete }: CartSidebarProps) {
   const { t } = useLang();
   const { items, removeItem, updateQuantity, clearCart, totalPrice, totalItems } = useCart();
   const [step, setStep] = useState<CheckoutStep>('cart');
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerWhatsapp, setCustomerWhatsapp] = useState('');
+  const [promoCode, setPromoCode] = useState('');
+  const [showBoatRequired, setShowBoatRequired] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [validationError, setValidationError] = useState('');
 
   const finalTotal = Number(totalPrice);
+
+  // A valid trip needs a boat reservation (beach + day). Boat items have id starting with "boat-".
+  const hasBoatReservation = items.some(i => typeof i.id === 'string' && i.id.startsWith('boat-'));
 
   const handleProceedToCheckout = () => {
     if (items.length === 0) {
       setValidationError(t('add_activities_hint'));
       return;
     }
+    // Require a boat reservation (beach + day) before checkout.
+    if (!hasBoatReservation) {
+      setShowBoatRequired(true);
+      return;
+    }
     setValidationError('');
     setStep('contact');
   };
+
+  const goReserveBoat = () => {
+    setShowBoatRequired(false);
+    onClose();
+    if (onNavigateToBoat) {
+      setTimeout(() => onNavigateToBoat(), 350);
+    }
+  };
+
 
   const handleSendBooking = async () => {
     setValidationError('');
@@ -351,6 +371,24 @@ export default function CartSidebar({ visible, onClose, onBookingComplete }: Car
       </ScrollView>
 
       <View style={styles.footer}>
+        {/* Promo code */}
+        <View style={{ marginBottom: 12 }}>
+          <View style={styles.inputLabelRow}>
+            <Ionicons name="pricetag" size={14} color="#0D9488" />
+            <Text style={styles.inputLabel}>Promo code</Text>
+          </View>
+          <TextInput
+            style={styles.input}
+            value={promoCode}
+            onChangeText={setPromoCode}
+            placeholder="Enter promo code (optional)"
+            placeholderTextColor="#94A3B8"
+            autoCapitalize="characters"
+          />
+          <Text style={{ fontSize: 11, color: '#0D9488', marginTop: 6, lineHeight: 16 }}>
+            If your promo code is valid, the corresponding % discount will be applied and confirmed by email with the rest of your booking details.
+          </Text>
+        </View>
         {validationError ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEF2F2', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FECACA' }}>
             <Ionicons name="alert-circle" size={16} color="#DC2626" />
@@ -365,6 +403,37 @@ export default function CartSidebar({ visible, onClose, onBookingComplete }: Car
       </View>
     </>
   );
+
+  // ==================== BOAT REQUIRED POPUP ====================
+  const renderBoatRequiredPopup = () => (
+    <Modal visible={showBoatRequired} transparent animationType="fade">
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 28 }}>
+        <View style={{ backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', maxWidth: 380, alignItems: 'center' }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F0FDFA', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+            <Ionicons name="boat" size={32} color="#0D9488" />
+          </View>
+          <Text style={{ fontSize: 19, fontWeight: '800', color: '#0F172A', textAlign: 'center' }}>
+            Your boat is waiting!
+          </Text>
+          <Text style={{ fontSize: 14, color: '#64748B', textAlign: 'center', marginTop: 10, lineHeight: 21 }}>
+            Every adventure starts with the boat. You haven't picked a beach and a day yet — let's set sail first, then add the rest of your trip.
+          </Text>
+          <TouchableOpacity
+            style={[styles.sendBookingBtn, { marginTop: 22, alignSelf: 'stretch' }]}
+            onPress={goReserveBoat}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="navigate" size={18} color="#fff" />
+            <Text style={styles.sendBookingText}>Take me to the boat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ paddingVertical: 12, marginTop: 4 }} onPress={() => setShowBoatRequired(false)}>
+            <Text style={{ fontSize: 14, color: '#94A3B8', fontWeight: '600' }}>{t('cancel')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
 
 
   // ==================== SENDING STEP ====================
@@ -519,9 +588,11 @@ export default function CartSidebar({ visible, onClose, onBookingComplete }: Car
           {step === 'error' && renderErrorStep()}
         </View>
       </View>
+      {renderBoatRequiredPopup()}
     </Modal>
   );
 }
+
 
 const styles = StyleSheet.create({
   overlay: {
